@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --deloitte-green: #86BC25;
+    --deloitte-dark: #000000;
+    --deloitte-blue: #0076A8;
+    --deloitte-teal: #00A3AD;
+  }
+
+  body {
+    @apply bg-white text-deloitte-gray-800 font-sans antialiased;
+  }
+
+  * {
+    @apply border-deloitte-gray-200;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-deloitte-green text-white font-medium rounded-sm hover:bg-[#6fa01e] transition-all duration-200 shadow-sm hover:shadow-md;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-white text-deloitte-gray-800 font-medium rounded-sm border border-deloitte-gray-300 hover:border-deloitte-green hover:text-deloitte-green transition-all duration-200;
+  }
+
+  .btn-dark {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-deloitte-charcoal text-white font-medium rounded-sm hover:bg-deloitte-gray-700 transition-all duration-200;
+  }
+
+  .card {
+    @apply bg-white border border-deloitte-gray-100 rounded-sm shadow-sm hover:shadow-md transition-shadow duration-200;
+  }
+
+  .section-title {
+    @apply text-2xl md:text-3xl font-bold text-deloitte-gray-800 tracking-tight;
+  }
+
+  .section-subtitle {
+    @apply text-base text-deloitte-gray-500 mt-2 max-w-2xl;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-deloitte-gray-50;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-deloitte-gray-300 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-deloitte-gray-400;
+}
+
+/* Loading animation */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
