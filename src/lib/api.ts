@@ -1,208 +1,108 @@
 /**
- * Frontend API Client
+ * Frontend API Client - Supports SSE streaming
  */
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 
 export interface AnalysisResult {
-  status: string;
-  duration: string;
-  aShareData: any;
-  hShareData: any;
-  comparison: ComparisonResult;
-  report: AuditReport;
-  dimensions: DimensionResult[];
-  summary: AnalysisSummary;
+  status: string; duration: string; aShareData: any; hShareData: any;
+  comparison: any; report: any; dimensions: any[]; summary: AnalysisSummary;
 }
-
-export interface ComparisonResult {
-  totalChecked: number;
-  totalDiscrepancies: number;
-  criticalCount: number;
-  warningCount: number;
-  dimensionResults: Record<string, {
-    hasDiscrepancies: boolean;
-    discrepancies: Discrepancy[];
-  }>;
-}
-
-export interface Discrepancy {
-  field: string;
-  category: string;
-  severity: 'critical' | 'warning' | 'info';
-  aShareValue: string;
-  hShareValue: string;
-  difference: string;
-  aSharePage: string;
-  hSharePage: string;
-  description: string;
-}
-
-export interface DimensionResult {
-  id: string;
-  name: string;
-  level: string;
-  status: 'pass' | 'warning' | 'pending' | 'running';
-  discrepancies: number;
-}
-
-export interface AnalysisSummary {
-  totalChecked: number;
-  discrepancies: number;
-  critical: number;
-  warning: number;
-  passed: number;
-}
-
-export interface AuditReport {
-  title: string;
-  company: string;
-  reportPeriod: string;
-  auditDate: string;
-  overallConclusion: string;
-  riskLevel: string;
-  keyFindings: string[];
-  recommendations: string[];
-  detailedFindings: DetailedFinding[];
-  disclaimer: string;
-}
-
-export interface DetailedFinding {
-  id: number;
-  dimension: string;
-  field: string;
-  severity: string;
-  finding: string;
-  auditOpinion: string;
-  suggestedAction: string;
-}
-
-export interface ModelConfig {
-  config: Record<string, {
-    provider: string;
-    model: string;
-    description: string;
-  }>;
-  availableProviders: Array<{
-    id: string;
-    name: string;
-    endpoint: string;
-  }>;
-  functions: Array<{
-    id: string;
-    name: string;
-    description: string;
-  }>;
-}
+export interface AnalysisSummary { totalChecked: number; discrepancies: number; critical: number; warning: number; passed: number; }
+export interface StreamEvent { type: string; [key: string]: any; }
+export interface AuditDimension { id: string; name: string; enabled: boolean; fields: string[]; }
+export interface UserApiKeys { kimi?: string; kimiCode?: string; deepseek?: string; minimax?: string; glm?: string; qwen?: string; doubao?: string; }
 
 /**
- * Convert File to base64
+ * Streaming analysis with SSE
  */
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      // Remove data URL prefix
-      const base64 = result.split(',')[1];
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-/**
- * Upload and analyze reports
- */
-export async function analyzeReports(
-  aShareFile: File,
-  hShareFile: File,
-  modelConfig?: any,
-  onProgress?: (progress: number, message: string) => void
-): Promise<AnalysisResult> {
-  onProgress?.(5, '正在准备文件...');
-
-  // Convert files to base64 for JSON upload (Vercel serverless compatible)
-  const [aShareBase64, hShareBase64] = await Promise.all([
-    fileToBase64(aShareFile),
-    fileToBase64(hShareFile),
-  ]);
-
-  onProgress?.(15, '文件已编码，正在上传至服务器...');
+export async function analyzeReportsStream(
+  aShareFile: File, hShareFile: File,
+  options: { apiKeys?: UserApiKeys; dimensions?: AuditDimension[]; },
+  onEvent: (event: StreamEvent) => void
+): Promise<void> {
+  const [aBase64, hBase64] = await Promise.all([fileToBase64(aShareFile), fileToBase64(hShareFile)]);
 
   const response = await fetch(`${API_BASE}/analyze`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      aShareBase64,
-      hShareBase64,
-      modelConfig,
+      aShareBase64: aBase64, hShareBase64: hBase64,
+      apiKeys: options.apiKeys || {},
+      dimensions: options.dimensions,
     }),
   });
 
-  onProgress?.(30, '文件已上传，AI 正在解析财报...');
-
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: '未知错误' }));
-    throw new Error(error.error || `分析失败: ${response.status}`);
+    const err = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(err.error || `Failed: ${response.status}`);
   }
 
-  onProgress?.(90, '分析完成，生成报告...');
+  // Check if SSE
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('text/event-stream')) {
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-  const result = await response.json();
-  onProgress?.(100, '完成');
-  return result;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') return;
+          try { onEvent(JSON.parse(data)); } catch {}
+        }
+      }
+    }
+  } else {
+    // Fallback: non-streaming JSON response
+    const result = await response.json();
+    onEvent({ type: 'complete', result });
+  }
 }
 
 /**
- * Get model configuration
+ * Get default audit dimensions
  */
-export async function getModelConfig(): Promise<ModelConfig> {
-  const response = await fetch(`${API_BASE}/models/config`);
-  if (!response.ok) throw new Error('获取模型配置失败');
-  return response.json();
-}
-
-/**
- * Update model configuration
- */
-export async function updateModelConfig(config: any): Promise<any> {
-  const response = await fetch(`${API_BASE}/models/config`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config),
-  });
-  if (!response.ok) throw new Error('更新模型配置失败');
-  return response.json();
-}
-
-/**
- * Get available models
- */
-export async function getAvailableModels(): Promise<any> {
-  const response = await fetch(`${API_BASE}/models/available`);
-  if (!response.ok) throw new Error('获取模型列表失败');
-  return response.json();
-}
-
-/**
- * Fetch stock reference data
- */
-export async function fetchStockReference(code: string, source: string = 'tushare'): Promise<any> {
-  const response = await fetch(`${API_BASE}/stock/${code}?source=${source}`);
-  if (!response.ok) throw new Error('获取股票数据失败');
-  return response.json();
-}
-
-/**
- * Health check
- */
-export async function healthCheck(): Promise<boolean> {
+export async function getAuditDimensions(): Promise<AuditDimension[]> {
   try {
-    const response = await fetch(`${API_BASE}/health`);
-    return response.ok;
+    const res = await fetch(`${API_BASE}/dimensions`);
+    const data = await res.json();
+    return data.dimensions;
   } catch {
-    return false;
+    return [
+      { id: 'financial_core', name: '财务报表核心数据', enabled: true, fields: ['资产总额','负债总额','所有者权益','归母权益','营业收入','净利润','归母净利润','基本每股收益','经营活动现金流'] },
+      { id: 'financial_ratios', name: '关键财务比率', enabled: true, fields: ['ROE','ROA','净息差','不良贷款率','拨备覆盖率','资本充足率','核心一级资本充足率'] },
+      { id: 'shares_dividend', name: '股份与分红数据', enabled: true, fields: ['普通股总数','H股数量','A股数量','每股收益','每股净资产','每股分红','分红比例'] },
+      { id: 'branch_detail', name: '分支机构与明细数据', enabled: true, fields: ['各分行资产规模','地区分布收入','地区分布利润','重要子公司数据'] },
+      { id: 'disclosure_text', name: '文本与披露口径', enabled: true, fields: ['会计估计表述','风险描述','报告期间','董事会日期','审计报告日期'] },
+    ];
   }
+}
+
+export async function getAvailableModels(): Promise<any> {
+  const res = await fetch(`${API_BASE}/models/available`);
+  return res.ok ? res.json() : { providers: [] };
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024, sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
