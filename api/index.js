@@ -225,8 +225,9 @@ async function extractStructuredData(text, reportType, dimensions, apiKeys) {
 
 // ─── Cross Compare ───
 async function crossCompareData(aData, hData, dimensions, apiKeys) {
-  const provider = apiKeys['kimi-code'] ? 'kimi-code' : 'kimi';
-  const key = apiKeys['kimi-code'] || apiKeys.kimi;
+  // Use kimi general API for comparison (kimi-code is for coding plan, not chat completions)
+  const provider = 'kimi';
+  const key = apiKeys.kimi;
 
   const result = await callLLM([
     { role: 'system', content: `你是资深审计师，对比A/H股数据。重点关注：数值差异、数据行错位、口径差异、披露遗漏。风险等级：critical(>5%差异)、warning(1-5%)、info(格式差异)。输出JSON。` },
